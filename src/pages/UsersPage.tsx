@@ -39,6 +39,9 @@ function UsersPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showUserModal, setShowUserModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editFormData, setEditFormData] = useState<Partial<User>>({});
   const [users, setUsers] = useState<User[]>([]);
 
   useEffect(() => {
@@ -196,6 +199,114 @@ function UsersPage() {
     toast.success(`User ${action} successfully`);
   };
 
+  const handleEditUser = (user: User) => {
+    setEditingUser(user);
+    setEditFormData({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      phone: user.phone || '',
+      age: user.age || '',
+      specialization: user.specialization || '',
+      experience: user.experience || '',
+      hourlyRate: user.hourlyRate || '',
+      licenseNumber: user.licenseNumber || '',
+      bio: user.bio || '',
+      emergencyContactEmail: user.emergencyContactEmail || '',
+      emergencyContactRelation: user.emergencyContactRelation || ''
+    });
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingUser || !editFormData.name || !editFormData.email) {
+      toast.error('Please fill in required fields (name and email)');
+      return;
+    }
+
+    const updatedUser: User = {
+      ...editingUser,
+      ...editFormData,
+      age: editFormData.age ? parseInt(editFormData.age.toString()) : editingUser.age,
+      hourlyRate: editFormData.hourlyRate ? parseInt(editFormData.hourlyRate.toString()) : editingUser.hourlyRate
+    };
+
+    // Update local state
+    setUsers(prev => prev.map(u => 
+      u.id === editingUser.id ? updatedUser : u
+    ));
+
+    // Update registered users in localStorage (skip demo users)
+    const registeredUsers = JSON.parse(localStorage.getItem('mindcare_registered_users') || '[]');
+    const isRegisteredUser = registeredUsers.some((u: any) => u.id === editingUser.id);
+    
+    if (isRegisteredUser) {
+      const updatedRegisteredUsers = registeredUsers.map((u: any) => 
+        u.id === editingUser.id ? { ...u, ...editFormData } : u
+      );
+      localStorage.setItem('mindcare_registered_users', JSON.stringify(updatedRegisteredUsers));
+    }
+
+    // Update therapist services if user is a therapist
+    if (updatedUser.role === 'therapist') {
+      const therapistServices = JSON.parse(localStorage.getItem('mindcare_therapist_services') || '[]');
+      const updatedServices = therapistServices.map((s: any) => 
+        s.therapistId === editingUser.id ? { 
+          ...s, 
+          therapistName: updatedUser.name,
+          experience: updatedUser.experience,
+          chargesPerSession: updatedUser.hourlyRate,
+          bio: updatedUser.bio,
+          specialization: updatedUser.specialization ? [updatedUser.specialization] : s.specialization
+        } : s
+      );
+      localStorage.setItem('mindcare_therapist_services', JSON.stringify(updatedServices));
+
+      // Update available therapists for booking
+      const availableTherapists = JSON.parse(localStorage.getItem('mindcare_therapists') || '[]');
+      const updatedAvailableTherapists = availableTherapists.map((t: any) => 
+        t.id === editingUser.id ? { 
+          ...t, 
+          name: updatedUser.name,
+          hourlyRate: updatedUser.hourlyRate,
+          bio: updatedUser.bio
+        } : t
+      );
+      localStorage.setItem('mindcare_therapists', JSON.stringify(updatedAvailableTherapists));
+    }
+
+    // Update bookings with updated user info
+    const bookings = JSON.parse(localStorage.getItem('mindcare_bookings') || '[]');
+    const updatedBookings = bookings.map((b: any) => {
+      if (b.patientId === editingUser.id) {
+        return { ...b, patientName: updatedUser.name, patientEmail: updatedUser.email };
+      }
+      if (b.therapistId === editingUser.id || b.therapistName === editingUser.name) {
+        return { ...b, therapistName: updatedUser.name };
+      }
+      return b;
+    });
+    localStorage.setItem('mindcare_bookings', JSON.stringify(updatedBookings));
+
+    toast.success('User updated successfully!');
+    setIsEditing(false);
+    setEditingUser(null);
+    setEditFormData({});
+    
+    // Refresh data
+    loadUsers();
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditingUser(null);
+    setEditFormData({});
+  };
+
+  const handleEditInputChange = (field: string, value: any) => {
+    setEditFormData(prev => ({ ...prev, [field]: value }));
+  };
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
@@ -533,7 +644,10 @@ function UsersPage() {
                     ×
                   </button>
                 </div>
-
+                  <button 
+                    onClick={() => handleEditUser(user)}
+                    className="p-2 text-gray-500 hover:text-green-600 transition-colors"
+                  >
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
                     <h3 className={`text-lg font-semibold mb-4 ${
@@ -702,6 +816,344 @@ function UsersPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Edit User Modal */}
+        {isEditing && editingUser && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            onClick={() => setIsEditing(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className={`max-w-2xl w-full rounded-2xl shadow-2xl max-h-96 overflow-y-auto ${
+                theme === 'dark' ? 'bg-gray-800' : 'bg-white'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className={`text-2xl font-bold ${
+                    theme === 'dark' ? 'text-white' : 'text-gray-800'
+                  }`}>
+                    Edit User: {editingUser.name}
+                  </h2>
+                  <button
+                    onClick={handleCancelEdit}
+                    className={`p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+                      theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                    }`}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-6">
+                  {/* Basic Information */}
+                  <div>
+                    <h3 className={`text-lg font-semibold mb-4 ${
+                      theme === 'dark' ? 'text-white' : 'text-gray-800'
+                    }`}>
+                      Basic Information
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className={`block text-sm font-medium mb-2 ${
+                          theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                        }`}>
+                          Full Name *
+                        </label>
+                        <input
+                          type="text"
+                          value={editFormData.name || ''}
+                          onChange={(e) => handleEditInputChange('name', e.target.value)}
+                          className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                            theme === 'dark'
+                              ? 'bg-gray-700 border-gray-600 text-white'
+                              : 'bg-white border-gray-300 text-gray-900'
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`block text-sm font-medium mb-2 ${
+                          theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                        }`}>
+                          Email Address *
+                        </label>
+                        <input
+                          type="email"
+                          value={editFormData.email || ''}
+                          onChange={(e) => handleEditInputChange('email', e.target.value)}
+                          className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                            theme === 'dark'
+                              ? 'bg-gray-700 border-gray-600 text-white'
+                              : 'bg-white border-gray-300 text-gray-900'
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`block text-sm font-medium mb-2 ${
+                          theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                        }`}>
+                          Phone Number
+                        </label>
+                        <input
+                          type="tel"
+                          value={editFormData.phone || ''}
+                          onChange={(e) => handleEditInputChange('phone', e.target.value)}
+                          className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                            theme === 'dark'
+                              ? 'bg-gray-700 border-gray-600 text-white'
+                              : 'bg-white border-gray-300 text-gray-900'
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className={`block text-sm font-medium mb-2 ${
+                          theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                        }`}>
+                          Role
+                        </label>
+                        <select
+                          value={editFormData.role || ''}
+                          onChange={(e) => handleEditInputChange('role', e.target.value)}
+                          className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                            theme === 'dark'
+                              ? 'bg-gray-700 border-gray-600 text-white'
+                              : 'bg-white border-gray-300 text-gray-900'
+                          }`}
+                        >
+                          <option value="patient">Patient</option>
+                          <option value="therapist">Therapist</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className={`block text-sm font-medium mb-2 ${
+                          theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                        }`}>
+                          Status
+                        </label>
+                        <select
+                          value={editFormData.status || ''}
+                          onChange={(e) => handleEditInputChange('status', e.target.value)}
+                          className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                            theme === 'dark'
+                              ? 'bg-gray-700 border-gray-600 text-white'
+                              : 'bg-white border-gray-300 text-gray-900'
+                          }`}
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                          <option value="suspended">Suspended</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Role-specific Information */}
+                  <div>
+                    <h3 className={`text-lg font-semibold mb-4 ${
+                      theme === 'dark' ? 'text-white' : 'text-gray-800'
+                    }`}>
+                      {editFormData.role === 'patient' ? 'Patient Information' : 
+                       editFormData.role === 'therapist' ? 'Professional Information' : 
+                       'Additional Information'}
+                    </h3>
+                    <div className="space-y-4">
+                      {editFormData.role === 'patient' && (
+                        <>
+                          <div>
+                            <label className={`block text-sm font-medium mb-2 ${
+                              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                            }`}>
+                              Age
+                            </label>
+                            <input
+                              type="number"
+                              min="18"
+                              max="120"
+                              value={editFormData.age || ''}
+                              onChange={(e) => handleEditInputChange('age', e.target.value)}
+                              className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                                theme === 'dark'
+                                  ? 'bg-gray-700 border-gray-600 text-white'
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`block text-sm font-medium mb-2 ${
+                              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                            }`}>
+                              Emergency Contact Email
+                            </label>
+                            <input
+                              type="email"
+                              value={editFormData.emergencyContactEmail || ''}
+                              onChange={(e) => handleEditInputChange('emergencyContactEmail', e.target.value)}
+                              className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                                theme === 'dark'
+                                  ? 'bg-gray-700 border-gray-600 text-white'
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`block text-sm font-medium mb-2 ${
+                              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                            }`}>
+                              Emergency Contact Relationship
+                            </label>
+                            <select
+                              value={editFormData.emergencyContactRelation || ''}
+                              onChange={(e) => handleEditInputChange('emergencyContactRelation', e.target.value)}
+                              className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                                theme === 'dark'
+                                  ? 'bg-gray-700 border-gray-600 text-white'
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            >
+                              <option value="">Select relationship</option>
+                              <option value="parent">Parent</option>
+                              <option value="spouse">Spouse</option>
+                              <option value="sibling">Sibling</option>
+                              <option value="child">Child</option>
+                              <option value="friend">Friend</option>
+                              <option value="other">Other</option>
+                            </select>
+                          </div>
+                        </>
+                      )}
+
+                      {editFormData.role === 'therapist' && (
+                        <>
+                          <div>
+                            <label className={`block text-sm font-medium mb-2 ${
+                              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                            }`}>
+                              Specialization
+                            </label>
+                            <input
+                              type="text"
+                              value={editFormData.specialization || ''}
+                              onChange={(e) => handleEditInputChange('specialization', e.target.value)}
+                              className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                                theme === 'dark'
+                                  ? 'bg-gray-700 border-gray-600 text-white'
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`block text-sm font-medium mb-2 ${
+                              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                            }`}>
+                              Experience
+                            </label>
+                            <input
+                              type="text"
+                              value={editFormData.experience || ''}
+                              onChange={(e) => handleEditInputChange('experience', e.target.value)}
+                              placeholder="e.g., 8 years"
+                              className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                                theme === 'dark'
+                                  ? 'bg-gray-700 border-gray-600 text-white'
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`block text-sm font-medium mb-2 ${
+                              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                            }`}>
+                              Hourly Rate ($)
+                            </label>
+                            <input
+                              type="number"
+                              min="50"
+                              max="500"
+                              value={editFormData.hourlyRate || ''}
+                              onChange={(e) => handleEditInputChange('hourlyRate', e.target.value)}
+                              className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                                theme === 'dark'
+                                  ? 'bg-gray-700 border-gray-600 text-white'
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <label className={`block text-sm font-medium mb-2 ${
+                              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                            }`}>
+                              License Number
+                            </label>
+                            <input
+                              type="text"
+                              value={editFormData.licenseNumber || ''}
+                              onChange={(e) => handleEditInputChange('licenseNumber', e.target.value)}
+                              className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                                theme === 'dark'
+                                  ? 'bg-gray-700 border-gray-600 text-white'
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {/* Bio field for all roles */}
+                      <div>
+                        <label className={`block text-sm font-medium mb-2 ${
+                          theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                        }`}>
+                          Bio
+                        </label>
+                        <textarea
+                          value={editFormData.bio || ''}
+                          onChange={(e) => handleEditInputChange('bio', e.target.value)}
+                          rows={3}
+                          className={`w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none ${
+                            theme === 'dark'
+                              ? 'bg-gray-700 border-gray-600 text-white'
+                              : 'bg-white border-gray-300 text-gray-900'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex space-x-3 mt-6">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleSaveEdit}
+                    className="flex-1 py-3 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-xl font-semibold hover:from-green-600 hover:to-teal-600 transition-all duration-300 flex items-center justify-center space-x-2"
+                  >
+                    <CheckCircle className="w-5 h-5" />
+                    <span>Save Changes</span>
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleCancelEdit}
+                    className={`flex-1 py-3 rounded-xl font-semibold ${
+                      theme === 'dark'
+                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Cancel
+                  </motion.button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
